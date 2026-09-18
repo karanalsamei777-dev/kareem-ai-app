@@ -1,21 +1,101 @@
-name: kareem_ai
-description: "A new Flutter project."
-publish_to: 'none'
+name: Build APK & Deploy PWA
 
-version: 1.0.0+1
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
 
-environment:
-  sdk: '>=3.0.0 <4.0.0'
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
-dependencies:
-  flutter:
-    sdk: flutter
-  cupertino_icons: ^1.0.8
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^4.0.0
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-flutter:
-  uses-material-design: true
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Ensure Android Project Setup
+        run: |
+          if [ ! -d "android" ]; then
+            echo "Android directory missing. Generating Flutter Android structure..."
+            flutter create . --platforms=android,web --org com.kareem.ai
+          fi
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build Release APK
+        run: flutter build apk --release --no-tree-shake-icons
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  build-web:
+    name: Build & Deploy PWA
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Ensure Web Project Setup
+        run: |
+          if [ ! -d "web" ]; then
+            echo "Web directory missing. Generating Flutter Web structure..."
+            flutter create . --platforms=web --org com.kareem.ai
+          fi
+
+      - name: Enable Web Support
+        run: flutter config --enable-web
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build PWA Release
+        run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Web Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
